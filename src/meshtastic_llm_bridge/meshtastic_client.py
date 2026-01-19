@@ -88,7 +88,9 @@ class MeshtasticClient:
     def register_message_callback(self, callback: Callable[[InboundMessage], None]) -> None:
         self._on_message = callback
 
-    def send_text(self, text: str, destination_id: Optional[str], channel: Optional[int]) -> None:
+    def send_text(
+        self, text: str, destination_id: Optional[str | int], channel: Optional[int]
+    ) -> None:
         if not self._interface:
             raise RuntimeError("Not connected")
 

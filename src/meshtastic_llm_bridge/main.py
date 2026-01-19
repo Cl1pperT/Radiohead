@@ -140,7 +140,12 @@ class BridgeService:
             destination_id: Optional[str]
             channel_index: Optional[int]
             if message.is_dm:
-                destination_id = message.sender_id
+                if message.sender_id.startswith("!"):
+                    destination_id = message.sender_id
+                elif message.from_num is not None:
+                    destination_id = message.from_num
+                else:
+                    destination_id = message.sender_id
                 channel_index = None
             else:
                 destination_id = None

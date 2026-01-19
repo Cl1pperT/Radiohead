@@ -137,7 +137,7 @@ class BridgeService:
 
             chunks = chunk_text(reply, self._settings.max_reply_chars)
 
-            destination_id: Optional[str]
+            destination_id: Optional[str | int]
             channel_index: Optional[int]
             if message.is_dm:
                 if message.sender_id.startswith("!"):

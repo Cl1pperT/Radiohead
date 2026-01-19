@@ -1,0 +1,17 @@
+[Unit]
+Description=Meshtastic LLM Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/meshtastic-llm-bridge
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/etc/meshtastic-llm-bridge.env
+ExecStart=/opt/meshtastic-llm-bridge/.venv/bin/python -m meshtastic_llm_bridge
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

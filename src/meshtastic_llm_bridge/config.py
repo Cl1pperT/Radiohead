@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import json
 from pathlib import Path
 from typing import List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources import DotEnvSettingsSource, EnvSettingsSource
 
 
 def _parse_csv(value: Optional[object]) -> List[str]:
@@ -19,6 +21,13 @@ def _parse_csv(value: Optional[object]) -> List[str]:
         stripped = value.strip()
         if not stripped:
             return []
+        if stripped.startswith("[") and stripped.endswith("]"):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, list):
+                    return [str(item).strip() for item in data if str(item).strip()]
+            except json.JSONDecodeError:
+                pass
         return [item.strip() for item in stripped.split(",") if item.strip()]
     return [str(value).strip()]
 
@@ -49,6 +58,22 @@ class Settings(BaseSettings):
         populate_by_name=True,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            CsvEnvSettingsSource(settings_cls),
+            CsvDotEnvSettingsSource(settings_cls),
+            file_secret_settings,
+        )
 
     @field_validator("allowed_channels", mode="before")
     @classmethod
@@ -90,3 +115,21 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     return Settings()
+
+
+class CsvEnvSettingsSource(EnvSettingsSource):
+    _csv_fields = {"allowed_channels", "allowed_senders"}
+
+    def decode_complex_value(self, field_name, field, value):  # type: ignore[override]
+        if field_name in self._csv_fields:
+            return value
+        return super().decode_complex_value(field_name, field, value)
+
+
+class CsvDotEnvSettingsSource(DotEnvSettingsSource):
+    _csv_fields = {"allowed_channels", "allowed_senders"}
+
+    def decode_complex_value(self, field_name, field, value):  # type: ignore[override]
+        if field_name in self._csv_fields:
+            return value
+        return super().decode_complex_value(field_name, field, value)

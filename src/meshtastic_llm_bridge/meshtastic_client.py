@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import inspect
 import threading
 import time
 from dataclasses import dataclass
@@ -53,10 +54,7 @@ class MeshtasticClient:
         last_error: Optional[Exception] = None
         for port in ports:
             try:
-                self._interface = meshtastic.serial_interface.SerialInterface(
-                    devPath=port,
-                    baudRate=self._baudrate,
-                )
+                self._interface = self._create_interface(port)
                 self._logger.info("Connected to Meshtastic", extra={"event": "connect", "port": port})
                 self._refresh_self_ids()
                 self._subscribe()
@@ -70,6 +68,29 @@ class MeshtasticClient:
                 time.sleep(1)
 
         raise RuntimeError("Unable to connect to Meshtastic device") from last_error
+
+    def _create_interface(self, port: str) -> meshtastic.serial_interface.SerialInterface:
+        constructor = meshtastic.serial_interface.SerialInterface
+        kwargs: dict[str, Any] = {"devPath": port}
+        try:
+            params = set(inspect.signature(constructor).parameters)
+        except (TypeError, ValueError):
+            params = set()
+
+        if "baudRate" in params:
+            kwargs["baudRate"] = self._baudrate
+        elif "baudrate" in params:
+            kwargs["baudrate"] = self._baudrate
+        elif "baud" in params:
+            kwargs["baud"] = self._baudrate
+
+        try:
+            return constructor(**kwargs)
+        except TypeError:
+            kwargs.pop("baudRate", None)
+            kwargs.pop("baudrate", None)
+            kwargs.pop("baud", None)
+            return constructor(**kwargs)
 
     def close(self) -> None:
         if self._interface:

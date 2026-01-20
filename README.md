@@ -24,9 +24,12 @@ No additional wiring needed beyond USB for data and power.
 
 ## Install
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .[dev]
+uv sync
+```
+
+For dev tools (tests/formatting):
+```bash
+uv sync --extra dev
 ```
 
 ## Configure
@@ -56,6 +59,16 @@ ls /dev/ttyACM* /dev/ttyUSB*
 If you see something like `/dev/ttyACM0`, you can set `SERIAL_PORT` to it. Otherwise, leave it empty for autodetect.
 
 ## Run (foreground)
+```bash
+uv run meshtastic-llm-bridge
+```
+
+or
+```bash
+uv run python -m meshtastic_llm_bridge
+```
+
+or
 ```bash
 python -m meshtastic_llm_bridge
 ```
@@ -90,7 +103,8 @@ Place your environment file at `/etc/meshtastic-llm-bridge.env`.
 
 ## Development
 ```bash
-pytest
-ruff check .
-black .
+uv sync --extra dev
+uv run pytest
+uv run ruff check .
+uv run black .
 ```

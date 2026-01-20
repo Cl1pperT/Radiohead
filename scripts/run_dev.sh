@@ -2,4 +2,4 @@
 set -euo pipefail
 
 export PYTHONUNBUFFERED=1
-python -m meshtastic_llm_bridge
+uv run python -m meshtastic_llm_bridge

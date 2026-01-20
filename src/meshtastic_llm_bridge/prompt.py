@@ -9,9 +9,7 @@ from .storage import MessageRecord
 
 
 SYSTEM_PROMPT = (
-    "You are a concise radio mesh assistant. "
-    "Reply briefly and clearly in plain text. "
-    "Avoid long lists or unnecessary detail."
+    "Reply briefly in 10 words or less."
 )
 
 

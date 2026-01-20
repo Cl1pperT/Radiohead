@@ -6,6 +6,8 @@ import logging
 import time
 from typing import Optional
 
+import httpx
+
 from .config import Settings, load_settings
 from .meshtastic_client import InboundMessage, MeshtasticClient
 from .ollama_client import OllamaClient
@@ -131,6 +133,14 @@ class BridgeService:
 
             try:
                 llm_result = self._ollama.generate(prompt)
+            except Exception as exc:
+                error_reply = self._error_reply_for_exception(exc)
+                if error_reply:
+                    self._send_reply(message, error_reply, latency_ms=None, is_error=True)
+                if self._last_prompt_by_sender.get(message.sender_id) == stripped_text:
+                    self._last_prompt_by_sender.pop(message.sender_id, None)
+                return
+            try:
                 reply = normalize_reply(llm_result.response)
                 reply = enforce_max_length(reply, self._settings.max_reply_chars)
 
@@ -148,52 +158,12 @@ class BridgeService:
                     latency_ms=round(llm_result.latency_ms, 2),
                 )
 
-                chunks = chunk_text(reply, self._settings.max_reply_chars)
-
-                destination_id: Optional[str | int]
-                channel_index: Optional[int]
-                if message.is_dm:
-                    if message.sender_id.startswith("!"):
-                        destination_id = message.sender_id
-                    elif message.from_num is not None:
-                        destination_id = message.from_num
-                    else:
-                        destination_id = message.sender_id
-                    channel_index = None
-                else:
-                    destination_id = None
-                    channel_index = message.channel or 0
-
-                for idx, chunk in enumerate(chunks, start=1):
-                    send_start = time.perf_counter()
-                    if not self._client:
-                        raise RuntimeError("Meshtastic client not available")
-                    self._client.send_text(chunk, destination_id, channel_index)
-                    send_latency = (time.perf_counter() - send_start) * 1000
-                    log_event(
-                        self._logger,
-                        logging.INFO,
-                        "message_out",
-                        sender_id=message.sender_id,
-                        channel=channel_index,
-                        is_dm=message.is_dm,
-                        chunk_index=idx,
-                        chunk_count=len(chunks),
-                        send_latency_ms=round(send_latency, 2),
-                    )
-
-                outbound_record = MessageRecord(
-                    direction="out",
-                    sender_id=message.sender_id,
-                    sender_short_name=message.sender_short_name,
-                    sender_long_name=message.sender_long_name,
-                    channel=message.channel,
-                    text=reply,
-                    timestamp=now_ts(),
+                self._send_reply(
+                    message,
+                    reply,
                     latency_ms=llm_result.latency_ms,
-                    message_id=None,
+                    is_error=False,
                 )
-                self._storage.add_message(outbound_record)
             except Exception:
                 if self._last_prompt_by_sender.get(message.sender_id) == stripped_text:
                     self._last_prompt_by_sender.pop(message.sender_id, None)
@@ -226,6 +196,79 @@ class BridgeService:
             return False
 
         return True
+
+    def _send_reply(
+        self,
+        message: InboundMessage,
+        reply: str,
+        latency_ms: Optional[float],
+        is_error: bool,
+    ) -> None:
+        chunks = chunk_text(reply, self._settings.max_reply_chars)
+        destination_id, channel_index = self._resolve_destination(message)
+
+        for idx, chunk in enumerate(chunks, start=1):
+            send_start = time.perf_counter()
+            if not self._client:
+                raise RuntimeError("Meshtastic client not available")
+            self._client.send_text(chunk, destination_id, channel_index)
+            send_latency = (time.perf_counter() - send_start) * 1000
+            log_event(
+                self._logger,
+                logging.INFO,
+                "message_out_error" if is_error else "message_out",
+                sender_id=message.sender_id,
+                channel=channel_index,
+                is_dm=message.is_dm,
+                chunk_index=idx,
+                chunk_count=len(chunks),
+                send_latency_ms=round(send_latency, 2),
+                is_error=is_error,
+            )
+
+        outbound_record = MessageRecord(
+            direction="out",
+            sender_id=message.sender_id,
+            sender_short_name=message.sender_short_name,
+            sender_long_name=message.sender_long_name,
+            channel=message.channel,
+            text=reply,
+            timestamp=now_ts(),
+            latency_ms=latency_ms,
+            message_id=None,
+        )
+        self._storage.add_message(outbound_record)
+
+    def _resolve_destination(
+        self, message: InboundMessage
+    ) -> tuple[Optional[str | int], Optional[int]]:
+        if message.is_dm:
+            if message.sender_id.startswith("!"):
+                destination_id: Optional[str | int] = message.sender_id
+            elif message.from_num is not None:
+                destination_id = message.from_num
+            else:
+                destination_id = message.sender_id
+            channel_index: Optional[int] = None
+        else:
+            destination_id = None
+            channel_index = message.channel or 0
+        return destination_id, channel_index
+
+    def _error_reply_for_exception(self, exc: Exception) -> str:
+        cause = exc.__cause__ or exc
+        if isinstance(cause, httpx.TimeoutException):
+            return "AI timed out. Try again."
+        if isinstance(cause, httpx.ConnectError):
+            return "AI unavailable. Check Ollama."
+        if isinstance(cause, httpx.HTTPStatusError):
+            status = cause.response.status_code if cause.response else None
+            if status == 404:
+                return "AI model not found."
+            if status:
+                return f"AI error ({status})."
+            return "AI error."
+        return "AI error. Try again."
 
 
 def main() -> None:

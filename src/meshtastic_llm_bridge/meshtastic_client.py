@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import glob
 import inspect
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -151,19 +152,25 @@ class MeshtasticClient:
             except Exception:
                 continue
 
-    def _on_connect(self, *args: Any, **kwargs: Any) -> None:
+    def _on_connect(self, interface: Any = None, **kwargs: Any) -> None:
         self._refresh_self_ids()
 
-    def _on_disconnect(self, *args: Any, **kwargs: Any) -> None:
+    def _on_disconnect(self, interface: Any = None, **kwargs: Any) -> None:
         self._logger.warning("Meshtastic disconnected", extra={"event": "disconnect"})
         self._disconnect_event.set()
 
-    def _on_receive(self, *args: Any, **kwargs: Any) -> None:
-        if not args and "packet" not in kwargs:
-            return
-        packet = args[0] if args else kwargs.get("packet")
+    def _on_receive(
+        self, packet: Optional[dict[str, Any]] = None, interface: Any = None, **kwargs: Any
+    ) -> None:
+        if packet is None:
+            packet = kwargs.get("packet")
         if not isinstance(packet, dict):
             return
+        if self._logger.isEnabledFor(logging.DEBUG):
+            self._logger.debug(
+                "Meshtastic packet received",
+                extra={"event": "packet_raw", "packet": packet},
+            )
         message = self._parse_packet(packet)
         if message and self._on_message:
             self._on_message(message)

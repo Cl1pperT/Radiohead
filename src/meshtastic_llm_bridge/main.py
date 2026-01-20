@@ -30,6 +30,7 @@ class BridgeService:
             model=settings.ollama_model,
         )
         self._client: Optional[MeshtasticClient] = None
+        self._last_prompt_by_sender: dict[str, str] = {}
 
     def run_forever(self) -> None:
         backoff = 2.0
@@ -108,10 +109,19 @@ class BridgeService:
             if not self._should_respond(message):
                 return
 
-            stripped_text = strip_trigger_prefix(message.text, self._settings.trigger_prefix)
+            stripped_text = stored_text
             if not stripped_text:
                 log_event(self._logger, logging.INFO, "empty_trigger", sender_id=message.sender_id)
                 return
+            if self._last_prompt_by_sender.get(message.sender_id) == stripped_text:
+                log_event(
+                    self._logger,
+                    logging.INFO,
+                    "duplicate_prompt",
+                    sender_id=message.sender_id,
+                )
+                return
+            self._last_prompt_by_sender[message.sender_id] = stripped_text
             message.text = stripped_text
             prompt = build_prompt(
                 message=message,
@@ -119,68 +129,75 @@ class BridgeService:
                 max_reply_chars=self._settings.max_reply_chars,
             )
 
-            llm_result = self._ollama.generate(prompt)
-            reply = normalize_reply(llm_result.response)
-            reply = enforce_max_length(reply, self._settings.max_reply_chars)
+            try:
+                llm_result = self._ollama.generate(prompt)
+                reply = normalize_reply(llm_result.response)
+                reply = enforce_max_length(reply, self._settings.max_reply_chars)
 
-            if not reply:
-                log_event(self._logger, logging.WARNING, "empty_reply")
-                return
+                if not reply:
+                    log_event(self._logger, logging.WARNING, "empty_reply")
+                    if self._last_prompt_by_sender.get(message.sender_id) == stripped_text:
+                        self._last_prompt_by_sender.pop(message.sender_id, None)
+                    return
 
-            log_event(
-                self._logger,
-                logging.INFO,
-                "llm_response",
-                sender_id=message.sender_id,
-                latency_ms=round(llm_result.latency_ms, 2),
-            )
-
-            chunks = chunk_text(reply, self._settings.max_reply_chars)
-
-            destination_id: Optional[str | int]
-            channel_index: Optional[int]
-            if message.is_dm:
-                if message.sender_id.startswith("!"):
-                    destination_id = message.sender_id
-                elif message.from_num is not None:
-                    destination_id = message.from_num
-                else:
-                    destination_id = message.sender_id
-                channel_index = None
-            else:
-                destination_id = None
-                channel_index = message.channel or 0
-
-            for idx, chunk in enumerate(chunks, start=1):
-                send_start = time.perf_counter()
-                if not self._client:
-                    raise RuntimeError("Meshtastic client not available")
-                self._client.send_text(chunk, destination_id, channel_index)
-                send_latency = (time.perf_counter() - send_start) * 1000
                 log_event(
                     self._logger,
                     logging.INFO,
-                    "message_out",
+                    "llm_response",
                     sender_id=message.sender_id,
-                    channel=channel_index,
-                    is_dm=message.is_dm,
-                    chunk_index=idx,
-                    chunk_count=len(chunks),
-                    send_latency_ms=round(send_latency, 2),
+                    latency_ms=round(llm_result.latency_ms, 2),
                 )
 
-            outbound_record = MessageRecord(
-                direction="out",
-                sender_id=message.sender_id,
-                sender_short_name=message.sender_short_name,
-                sender_long_name=message.sender_long_name,
-                channel=message.channel,
-                text=reply,
-                timestamp=now_ts(),
-                latency_ms=llm_result.latency_ms,
-                message_id=None,
-            )
-            self._storage.add_message(outbound_record)
+                chunks = chunk_text(reply, self._settings.max_reply_chars)
+
+                destination_id: Optional[str | int]
+                channel_index: Optional[int]
+                if message.is_dm:
+                    if message.sender_id.startswith("!"):
+                        destination_id = message.sender_id
+                    elif message.from_num is not None:
+                        destination_id = message.from_num
+                    else:
+                        destination_id = message.sender_id
+                    channel_index = None
+                else:
+                    destination_id = None
+                    channel_index = message.channel or 0
+
+                for idx, chunk in enumerate(chunks, start=1):
+                    send_start = time.perf_counter()
+                    if not self._client:
+                        raise RuntimeError("Meshtastic client not available")
+                    self._client.send_text(chunk, destination_id, channel_index)
+                    send_latency = (time.perf_counter() - send_start) * 1000
+                    log_event(
+                        self._logger,
+                        logging.INFO,
+                        "message_out",
+                        sender_id=message.sender_id,
+                        channel=channel_index,
+                        is_dm=message.is_dm,
+                        chunk_index=idx,
+                        chunk_count=len(chunks),
+                        send_latency_ms=round(send_latency, 2),
+                    )
+
+                outbound_record = MessageRecord(
+                    direction="out",
+                    sender_id=message.sender_id,
+                    sender_short_name=message.sender_short_name,
+                    sender_long_name=message.sender_long_name,
+                    channel=message.channel,
+                    text=reply,
+                    timestamp=now_ts(),
+                    latency_ms=llm_result.latency_ms,
+                    message_id=None,
+                )
+                self._storage.add_message(outbound_record)
+            except Exception:
+                if self._last_prompt_by_sender.get(message.sender_id) == stripped_text:
+                    self._last_prompt_by_sender.pop(message.sender_id, None)
+                raise
         except Exception as exc:  # pragma: no cover
             log_event(
                 self._logger,

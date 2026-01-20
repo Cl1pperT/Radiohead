@@ -9,7 +9,7 @@ from .storage import MessageRecord
 
 
 SYSTEM_PROMPT = (
-    "Reply briefly in 10 words or less."
+    "Reply briefly in less than 10 words or less."
 )
 
 

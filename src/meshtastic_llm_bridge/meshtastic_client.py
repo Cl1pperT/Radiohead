@@ -217,18 +217,12 @@ class MeshtasticClient:
             return None, None
         node = None
         try:
-            if from_num is not None:
-                node = self._interface.getNode(from_num)
+            if from_num is not None and from_num in self._interface.nodes:
+                node = self._interface.nodes.get(from_num)
+            elif from_id and from_id in self._interface.nodes:
+                node = self._interface.nodes.get(from_id)
         except Exception:
             node = None
-        if not node:
-            try:
-                if from_num is not None and from_num in self._interface.nodes:
-                    node = self._interface.nodes.get(from_num)
-                elif from_id and from_id in self._interface.nodes:
-                    node = self._interface.nodes.get(from_id)
-            except Exception:
-                node = None
 
         if not node:
             return None, None

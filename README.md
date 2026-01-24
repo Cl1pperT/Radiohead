@@ -45,6 +45,7 @@ Key settings:
 - `RESPOND_TO_DMS_ONLY`: if `true`, only reply to DMs.
 - `ALLOWED_CHANNELS`: comma list like `0,1` to allow only those channels.
 - `ALLOWED_SENDERS`: comma list of node IDs (e.g. `!abcd1234`).
+- `DUPLICATE_PROMPT_WINDOW_S`: suppress identical prompts from the same sender for N seconds (set `0` to disable).
 
 Make sure the model is available locally:
 ```bash

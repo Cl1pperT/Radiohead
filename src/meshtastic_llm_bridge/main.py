@@ -32,7 +32,7 @@ class BridgeService:
             model=settings.ollama_model,
         )
         self._client: Optional[MeshtasticClient] = None
-        self._last_prompt_by_sender: dict[str, str] = {}
+        self._last_prompt_by_sender: dict[str, tuple[str, float]] = {}
 
     def run_forever(self) -> None:
         backoff = 2.0
@@ -96,6 +96,7 @@ class BridgeService:
             )
             self._storage.add_message(inbound_record)
 
+            received_ts = now_ts()
             log_event(
                 self._logger,
                 logging.INFO,
@@ -105,7 +106,7 @@ class BridgeService:
                 is_dm=message.is_dm,
                 text=message.text,
                 rx_time=message.rx_time,
-                rx_age_ms=round((now_ts() - message.rx_time) * 1000, 2),
+                rx_age_ms=round((received_ts - message.rx_time) * 1000, 2),
             )
 
             if not self._should_respond(message):
@@ -115,7 +116,7 @@ class BridgeService:
             if not stripped_text:
                 log_event(self._logger, logging.INFO, "empty_trigger", sender_id=message.sender_id)
                 return
-            if self._last_prompt_by_sender.get(message.sender_id) == stripped_text:
+            if self._is_duplicate_prompt(message.sender_id, stripped_text, received_ts):
                 log_event(
                     self._logger,
                     logging.INFO,
@@ -123,7 +124,7 @@ class BridgeService:
                     sender_id=message.sender_id,
                 )
                 return
-            self._last_prompt_by_sender[message.sender_id] = stripped_text
+            self._last_prompt_by_sender[message.sender_id] = (stripped_text, received_ts)
             message.text = stripped_text
             prompt = build_prompt(
                 message=message,
@@ -137,8 +138,7 @@ class BridgeService:
                 error_reply = self._error_reply_for_exception(exc)
                 if error_reply:
                     self._send_reply(message, error_reply, latency_ms=None, is_error=True)
-                if self._last_prompt_by_sender.get(message.sender_id) == stripped_text:
-                    self._last_prompt_by_sender.pop(message.sender_id, None)
+                self._clear_prompt_guard(message.sender_id, stripped_text)
                 return
             try:
                 reply = normalize_reply(llm_result.response)
@@ -146,8 +146,7 @@ class BridgeService:
 
                 if not reply:
                     log_event(self._logger, logging.WARNING, "empty_reply")
-                    if self._last_prompt_by_sender.get(message.sender_id) == stripped_text:
-                        self._last_prompt_by_sender.pop(message.sender_id, None)
+                    self._clear_prompt_guard(message.sender_id, stripped_text)
                     return
 
                 log_event(
@@ -165,8 +164,7 @@ class BridgeService:
                     is_error=False,
                 )
             except Exception:
-                if self._last_prompt_by_sender.get(message.sender_id) == stripped_text:
-                    self._last_prompt_by_sender.pop(message.sender_id, None)
+                self._clear_prompt_guard(message.sender_id, stripped_text)
                 raise
         except Exception as exc:  # pragma: no cover
             log_event(
@@ -196,6 +194,24 @@ class BridgeService:
             return False
 
         return True
+
+    def _is_duplicate_prompt(self, sender_id: str, text: str, now: float) -> bool:
+        window_s = self._settings.duplicate_prompt_window_s
+        if window_s <= 0:
+            return False
+        last = self._last_prompt_by_sender.get(sender_id)
+        if not last:
+            return False
+        last_text, last_ts = last
+        if now - last_ts > window_s:
+            self._last_prompt_by_sender.pop(sender_id, None)
+            return False
+        return last_text == text
+
+    def _clear_prompt_guard(self, sender_id: str, text: str) -> None:
+        last = self._last_prompt_by_sender.get(sender_id)
+        if last and last[0] == text:
+            self._last_prompt_by_sender.pop(sender_id, None)
 
     def _send_reply(
         self,

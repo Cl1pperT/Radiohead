@@ -48,6 +48,9 @@ class Settings(BaseSettings):
 
     max_reply_chars: int = Field(default=200, alias="MAX_REPLY_CHARS")
     memory_turns: int = Field(default=6, alias="MEMORY_TURNS")
+    duplicate_prompt_window_s: float = Field(
+        default=60.0, alias="DUPLICATE_PROMPT_WINDOW_S"
+    )
 
     data_dir: Path = Field(default=Path("./data"), alias="DATA_DIR")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
@@ -104,6 +107,13 @@ class Settings(BaseSettings):
     def _validate_memory_turns(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("MEMORY_TURNS must be > 0")
+        return value
+
+    @field_validator("duplicate_prompt_window_s")
+    @classmethod
+    def _validate_duplicate_prompt_window(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("DUPLICATE_PROMPT_WINDOW_S must be >= 0")
         return value
 
     @field_validator("log_level")

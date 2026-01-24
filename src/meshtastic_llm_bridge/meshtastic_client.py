@@ -190,14 +190,15 @@ class MeshtasticClient:
             channel = packet.get("channelIndex")
 
         sender_id = from_id or (str(from_num) if from_num is not None else "unknown")
+        sender_short, sender_long = self._lookup_sender_names(from_num, from_id)
         is_dm = self._is_dm(to_num, to_id)
         rx_time = float(packet.get("rxTime") or time.time())
 
         return InboundMessage(
             text=text,
             sender_id=sender_id,
-            sender_short_name=None,
-            sender_long_name=None,
+            sender_short_name=sender_short,
+            sender_long_name=sender_long,
             channel=channel,
             is_dm=is_dm,
             rx_time=rx_time,

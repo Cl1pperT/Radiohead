@@ -35,8 +35,13 @@ def _parse_csv(value: Optional[object]) -> List[str]:
 class Settings(BaseSettings):
     """Application settings loaded from env and defaults."""
 
+    meshtastic_connection: str = Field(
+        default="serial", alias="MESHTASTIC_CONNECTION"
+    )
     serial_port: Optional[str] = Field(default=None, alias="SERIAL_PORT")
     baudrate: int = Field(default=115200, alias="BAUDRATE")
+    meshtastic_host: str = Field(default="localhost", alias="MESHTASTIC_HOST")
+    meshtastic_port: int = Field(default=4403, alias="MESHTASTIC_PORT")
 
     ollama_host: str = Field(default="http://localhost:11434", alias="OLLAMA_HOST")
     ollama_model: str = Field(default="mistral", alias="OLLAMA_MODEL")
@@ -120,6 +125,21 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_log_level(cls, value: str) -> str:
         return value.upper().strip()
+
+    @field_validator("meshtastic_connection")
+    @classmethod
+    def _validate_connection(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"serial", "tcp"}:
+            raise ValueError("MESHTASTIC_CONNECTION must be 'serial' or 'tcp'")
+        return normalized
+
+    @field_validator("meshtastic_port")
+    @classmethod
+    def _validate_port(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("MESHTASTIC_PORT must be > 0")
+        return value
 
 
 @lru_cache(maxsize=1)

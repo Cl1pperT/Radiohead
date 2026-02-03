@@ -46,6 +46,9 @@ Key settings:
 - `ALLOWED_CHANNELS`: comma list like `0,1` to allow only those channels.
 - `ALLOWED_SENDERS`: comma list of node IDs (e.g. `!abcd1234`).
 - `DUPLICATE_PROMPT_WINDOW_S`: suppress identical prompts from the same sender for N seconds (set `0` to disable).
+- `MESHTASTIC_CONNECTION`: `serial` (default) or `tcp`.
+- `MESHTASTIC_HOST`: hostname/IP for TCP connections.
+- `MESHTASTIC_PORT`: TCP port (default `4403`).
 
 Make sure the model is available locally:
 ```bash
@@ -58,6 +61,15 @@ Plug in the Heltec and run:
 ls /dev/ttyACM* /dev/ttyUSB*
 ```
 If you see something like `/dev/ttyACM0`, you can set `SERIAL_PORT` to it. Otherwise, leave it empty for autodetect.
+
+## Network (TCP) Connection
+If you want to run the bridge on a different machine than the radio, connect over TCP:
+```bash
+MESHTASTIC_CONNECTION=tcp
+MESHTASTIC_HOST=192.168.1.50
+MESHTASTIC_PORT=4403
+```
+The Meshtastic node must be reachable over the network and have its TCP interface enabled.
 
 ## Run (foreground)
 ```bash

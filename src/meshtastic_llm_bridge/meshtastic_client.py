@@ -14,6 +14,11 @@ from pubsub import pub
 
 import meshtastic.serial_interface
 
+try:
+    import meshtastic.tcp_interface as meshtastic_tcp_interface
+except Exception:  # pragma: no cover - optional import
+    meshtastic_tcp_interface = None
+
 
 BROADCAST_NUMS = {0, 0xFFFFFFFF}
 BROADCAST_IDS = {"^all", "all", "broadcast"}
@@ -36,11 +41,22 @@ class InboundMessage:
 
 
 class MeshtasticClient:
-    def __init__(self, serial_port: Optional[str], baudrate: int, logger) -> None:
+    def __init__(
+        self,
+        connection: str,
+        serial_port: Optional[str],
+        baudrate: int,
+        tcp_host: Optional[str],
+        tcp_port: Optional[int],
+        logger,
+    ) -> None:
+        self._connection = connection
         self._serial_port = serial_port
         self._baudrate = baudrate
+        self._tcp_host = tcp_host
+        self._tcp_port = tcp_port
         self._logger = logger
-        self._interface: Optional[meshtastic.serial_interface.SerialInterface] = None
+        self._interface: Optional[Any] = None
         self._disconnect_event = threading.Event()
         self._on_message: Optional[Callable[[InboundMessage], None]] = None
         self._self_node_ids: set[str] = set()
@@ -48,6 +64,21 @@ class MeshtasticClient:
         self._subscribed = False
 
     def connect(self) -> str:
+        if self._connection == "tcp":
+            host = (self._tcp_host or "").strip()
+            if not host:
+                raise RuntimeError("MESHTASTIC_HOST must be set for tcp connections")
+            port = self._tcp_port or 4403
+            self._interface = self._create_tcp_interface(host, port)
+            target = f"{host}:{port}"
+            self._logger.info(
+                "Connected to Meshtastic (tcp)",
+                extra={"event": "connect", "port": target, "connection": "tcp"},
+            )
+            self._refresh_self_ids()
+            self._subscribe()
+            return target
+
         ports = [self._serial_port] if self._serial_port else self._autodetect_ports()
         if not ports:
             raise RuntimeError("No serial ports found for Meshtastic device")
@@ -55,8 +86,11 @@ class MeshtasticClient:
         last_error: Optional[Exception] = None
         for port in ports:
             try:
-                self._interface = self._create_interface(port)
-                self._logger.info("Connected to Meshtastic", extra={"event": "connect", "port": port})
+                self._interface = self._create_serial_interface(port)
+                self._logger.info(
+                    "Connected to Meshtastic",
+                    extra={"event": "connect", "port": port, "connection": "serial"},
+                )
                 self._refresh_self_ids()
                 self._subscribe()
                 return port
@@ -70,7 +104,7 @@ class MeshtasticClient:
 
         raise RuntimeError("Unable to connect to Meshtastic device") from last_error
 
-    def _create_interface(self, port: str) -> meshtastic.serial_interface.SerialInterface:
+    def _create_serial_interface(self, port: str) -> meshtastic.serial_interface.SerialInterface:
         constructor = meshtastic.serial_interface.SerialInterface
         kwargs: dict[str, Any] = {"devPath": port}
         try:
@@ -92,6 +126,36 @@ class MeshtasticClient:
             kwargs.pop("baudrate", None)
             kwargs.pop("baud", None)
             return constructor(**kwargs)
+
+    def _create_tcp_interface(self, host: str, port: int) -> Any:
+        if meshtastic_tcp_interface is None:
+            raise RuntimeError("Meshtastic TCP interface not available in this install")
+        constructor = meshtastic_tcp_interface.TCPInterface
+        kwargs: dict[str, Any] = {}
+        try:
+            params = set(inspect.signature(constructor).parameters)
+        except (TypeError, ValueError):
+            params = set()
+
+        if "hostname" in params:
+            kwargs["hostname"] = host
+        elif "host" in params:
+            kwargs["host"] = host
+        elif "ip" in params:
+            kwargs["ip"] = host
+        elif "address" in params:
+            kwargs["address"] = host
+
+        if "port" in params:
+            kwargs["port"] = port
+
+        try:
+            return constructor(**kwargs)
+        except TypeError:
+            try:
+                return constructor(host, port)
+            except TypeError:
+                return constructor(host)
 
     def close(self) -> None:
         if self._interface:

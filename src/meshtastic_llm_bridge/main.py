@@ -38,8 +38,11 @@ class BridgeService:
         backoff = 2.0
         while True:
             self._client = MeshtasticClient(
+                connection=self._settings.meshtastic_connection,
                 serial_port=self._settings.serial_port,
                 baudrate=self._settings.baudrate,
+                tcp_host=self._settings.meshtastic_host,
+                tcp_port=self._settings.meshtastic_port,
                 logger=self._logger,
             )
             self._client.register_message_callback(self._handle_message)
